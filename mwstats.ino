@@ -10,11 +10,11 @@ const char* url      = "https://gist.githubusercontent.com/GITHUB_USER_HERE/GIST
 
 // --- Timing Variables ---
 unsigned long lastFetchTime = 0;
-const unsigned long fetchInterval = 3600000UL; 
+const unsigned long fetchInterval = 3600000UL; // 1 hour
 unsigned long lastStatSwitch = 0;
-const unsigned long STAT_SWITCH_INTERVAL = 4000; 
+const unsigned long STAT_SWITCH_INTERVAL = 4000; // 4 seconds per screen
 unsigned long lastScroll = 0;
-const int SCROLL_SPEED = 30; 
+const int SCROLL_SPEED = 30; // ms between movement
 
 // --- Display Objects ---
 TFT_eSPI tft = TFT_eSPI();
@@ -29,7 +29,6 @@ bool dataLoaded = false;
 // --- Scrolling Variables ---
 int scrollPos = 0;
 bool scrollLeft = true;
-int VIEW_WIDTH = 200; // Visible width for the sprite
 
 void setup() {
   Serial.begin(115200);
@@ -38,9 +37,9 @@ void setup() {
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
 
-  // Initialize Sprite
+  // Initialize Sprite (Width 200 to stay within the round screen center)
   scrollSprite.setColorDepth(8);
-  if (!scrollSprite.createSprite(VIEW_WIDTH, 50)) {
+  if (!scrollSprite.createSprite(200, 40)) {
     Serial.println("Sprite RAM Allocation Failed!");
   }
 
@@ -58,68 +57,87 @@ void setup() {
 }
 
 void loop() {
+  // 1. Periodic Data Refresh
   if (millis() - lastFetchTime >= fetchInterval) {
     fetchAndParse();
   }
 
-  // Page Rotator
+  // 2. Page Rotator (Non-blocking)
   if (millis() - lastStatSwitch >= STAT_SWITCH_INTERVAL) {
     lastStatSwitch = millis();
     currentStatIndex = (currentStatIndex + 1) % 8;
     
+    // Reset scroll state for the new word
     scrollPos = 0;
     scrollLeft = true;
     
-    drawStaticUI(displayLabels[currentStatIndex]);
+    // Draw the static background/label immediately
+    drawStaticUI(displayLabels[currentStatIndex], displayValues[currentStatIndex], currentStatIndex);
   }
 
-  // Constant Scroll Update - NOW APPLIES TO EVERYTHING
+  // 3. Constant Scroll Update
   String val = displayValues[currentStatIndex].length() > 0 ? displayValues[currentStatIndex] : "—";
-  
-  // Calculate width using Font 4
-  int textWidth = tft.textWidth(val, 4);
-
-  if (textWidth > VIEW_WIDTH) {
-    // Scroll if too long
-    updateScrollingText(val, true);
-  } else {
-    // Just center it within the sprite if it fits (no movement)
-    updateScrollingText(val, false);
+  if ((currentStatIndex == 0 || currentStatIndex == 1) && val.length() > 12) {
+    updateScrollingText(val);
   }
 }
 
-void drawStaticUI(String label) {
+void drawStaticUI(String label, String value, int index) {
   tft.fillScreen(TFT_BLACK);
-  tft.drawCircle(120, 120, 119, 0x3186); 
+  tft.drawCircle(120, 120, 119, 0x3186); // Decorative border
 
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.drawCentreString(label, 120, 50, 4); // Label stays at top
+  tft.drawCentreString(label, 120, 50, 4);
+
+  // Only draw value here if it's NOT a scrolling field
+  if (!((index == 0 || index == 1) && value.length() > 12)) {
+    drawValueNormal(value);
+  }
 }
 
-void updateScrollingText(String text, bool shouldMove) {
+void drawValueNormal(String value) {
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  
+  String lower = value;
+  lower.toLowerCase();
+  bool hasSuffix = (lower.endsWith("k") || lower.endsWith("m"));
+
+  if (hasSuffix) {
+    // Logic for numbers with suffixes (K/M)
+    String numPart = value.substring(0, value.length() - 1);
+    numPart.trim();
+    String suffixPart = value.substring(value.length() - 1);
+    suffixPart.toUpperCase();
+    
+    tft.drawCentreString(numPart, 120, 100, 7);
+    int w = tft.textWidth(numPart, 7);
+    tft.drawString(suffixPart, 125 + (w / 2), 105, 4);
+  } else {
+    // Default center draw for regular numbers
+    tft.drawCentreString(value, 120, 110, 4);
+  }
+}
+
+void updateScrollingText(String text) {
   int font = 4;
   int textWidth = tft.textWidth(text, font);
+  int viewWidth = 200;
 
   if (millis() - lastScroll > SCROLL_SPEED) {
     lastScroll = millis();
 
-    if (shouldMove) {
-      if (scrollLeft) {
-        scrollPos -= 2;
-        if (scrollPos <= -(textWidth - VIEW_WIDTH + 15)) scrollLeft = false;
-      } else {
-        scrollPos += 2;
-        if (scrollPos >= 15) scrollLeft = true;
-      }
+    if (scrollLeft) {
+      scrollPos -= 2;
+      if (scrollPos <= -(textWidth - viewWidth + 10)) scrollLeft = false;
     } else {
-      // Center static text inside the sprite area
-      scrollPos = (VIEW_WIDTH - textWidth) / 2;
+      scrollPos += 2;
+      if (scrollPos >= 10) scrollLeft = true;
     }
 
     scrollSprite.fillSprite(TFT_BLACK);
     scrollSprite.setTextColor(TFT_WHITE);
-    scrollSprite.drawString(text, scrollPos, 10, font);
-    scrollSprite.pushSprite(20, 100); // Draw at the center vertical position
+    scrollSprite.drawString(text, scrollPos, 5, font);
+    scrollSprite.pushSprite(20, 100); // Centered on the GC9A01
   }
 }
 
@@ -132,55 +150,109 @@ bool fetchAndParse() {
 
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
+    
+    // Debug: Print raw payload
+    Serial.println("Raw payload:");
+    Serial.println(payload);
+    
     payload.trim();
+    
+    // Parse the data based on the actual format
+    // Format: aoprint @aoegad 38 k Followers 18 Following 79 1.8 k 3.6 k 1.7 k
     
     int tokenIndex = 0;
     int startPos = 0;
-    String tokens[25]; 
+    String tokens[20]; // Temporary array to hold all tokens
     
-    while (startPos < payload.length() && tokenIndex < 25) {
+    // Tokenize by spaces
+    while (startPos < payload.length() && tokenIndex < 20) {
       int spacePos = payload.indexOf(' ', startPos);
       if (spacePos == -1) {
         tokens[tokenIndex++] = payload.substring(startPos);
         break;
       } else {
         String token = payload.substring(startPos, spacePos);
-        if (token.length() > 0) tokens[tokenIndex++] = token;
+        if (token.length() > 0) {
+          tokens[tokenIndex++] = token;
+        }
         startPos = spacePos + 1;
       }
     }
     
+    // Now map tokens to displayValues
+    // Expected format: Name Username FollowersNum FollowersUnit Username FollowingNum FollowingUnit BoostsNum BoostsUnit LikesNum LikesUnit DownloadsNum DownloadsUnit PrintsNum PrintsUnit
+    
     if (tokenIndex >= 2) {
-      displayValues[0] = tokens[0]; 
-      displayValues[1] = tokens[1]; 
+      displayValues[0] = tokens[0]; // Name (aoprint)
+      displayValues[1] = tokens[1]; // User (@aoegad)
       
+      // Parse Followers (38 k -> "38k")
       int i = 2;
-      for(int field = 2; field < 8; field++) {
-        // Skip label words like "Followers" or "Following" if they appear in the stream
-        if (i < tokenIndex && (tokens[i].equalsIgnoreCase("Followers") || tokens[i].equalsIgnoreCase("Following"))) {
-            i++;
+      if (i < tokenIndex) {
+        String followersValue = tokens[i];
+        if (i + 1 < tokenIndex && (tokens[i + 1].equalsIgnoreCase("k") || tokens[i + 1].equalsIgnoreCase("m"))) {
+          followersValue += tokens[i + 1];
+          i += 2;
+        } else {
+          i++;
         }
-
-        if (i < tokenIndex) {
-          String val = tokens[i];
-          // Check if next token is a unit (k/m)
-          if (i + 1 < tokenIndex && (tokens[i + 1].equalsIgnoreCase("k") || tokens[i + 1].equalsIgnoreCase("m"))) {
-            val += tokens[i + 1].toUpperCase();
-            i += 2;
-          } else {
-            i++;
-          }
-          displayValues[field] = val;
-        }
+        displayValues[2] = followersValue;
       }
+      
+      // Skip "Followers" text
+      if (i < tokenIndex && tokens[i].equalsIgnoreCase("Followers")) {
+        i++;
+      }
+      
+      // Parse Following (18 or 18 k -> "18" or "18k")
+      if (i < tokenIndex) {
+        String followingValue = tokens[i];
+        if (i + 1 < tokenIndex && (tokens[i + 1].equalsIgnoreCase("k") || tokens[i + 1].equalsIgnoreCase("m"))) {
+          followingValue += tokens[i + 1];
+          i += 2;
+        } else {
+          i++;
+        }
+        displayValues[3] = followingValue;
+      }
+      
+      // Skip "Following" text
+      if (i < tokenIndex && tokens[i].equalsIgnoreCase("Following")) {
+        i++;
+      }
+      
+      // Parse remaining numeric fields: Boosts, Likes, Downloads, Prints
+      int fieldIndex = 4;
+      while (i < tokenIndex && fieldIndex < 8) {
+        String value = tokens[i];
+        if (i + 1 < tokenIndex && (tokens[i + 1].equalsIgnoreCase("k") || tokens[i + 1].equalsIgnoreCase("m"))) {
+          value += tokens[i + 1];
+          i += 2;
+        } else {
+          i++;
+        }
+        displayValues[fieldIndex++] = value;
+      }
+    }
+    
+    // Debug: Print parsed values
+    Serial.println("\nParsed values:");
+    for (int i = 0; i < 8; i++) {
+      Serial.print(displayLabels[i]);
+      Serial.print(": ");
+      Serial.println(displayValues[i]);
     }
     
     lastFetchTime = millis();
     dataLoaded = true;
-    drawStaticUI(displayLabels[currentStatIndex]);
+    
+    // Update the display with the current stat
+    drawStaticUI(displayLabels[currentStatIndex], displayValues[currentStatIndex], currentStatIndex);
+    
     http.end();
     return true;
   }
+  
   http.end();
   return false;
 }
