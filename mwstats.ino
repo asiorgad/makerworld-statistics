@@ -3,14 +3,14 @@
 #include <SPI.h>
 #include <TFT_eSPI.h>
 
-// --- Configuration ---
+
 const char* ssid     = "WIFI SSID HERE";
 const char* password = "WIFI PASSWD HERE";
-const char* url      = "https://gist.githubusercontent.com/GITHUB_USER_HERE/GIST_ID_HERE/raw/FILENAME_HERE"; 
+const char* url      = "https://gist.githubusercontent.com/GITHUB_USER_HERE/GIST_ID_HERE/raw/bambu.txt"; 
 
 // --- Timing Variables ---
 unsigned long lastFetchTime = 0;
-const unsigned long fetchInterval = 600000UL; // 10 minutes fetch interval
+const unsigned long fetchInterval = 600000UL; // 10 minutes
 unsigned long lastStatSwitch = 0;
 const unsigned long STAT_SWITCH_INTERVAL = 4000; // 4 seconds per screen
 unsigned long lastScroll = 0;
@@ -21,14 +21,43 @@ TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite scrollSprite = TFT_eSprite(&tft);
 
 // --- Data Variables ---
-String displayLabels[8] = {"Name", "User", "Followers", "Following", "Boosts", "Likes", "Downloads", "Prints"};
-String displayValues[8] = {"", "", "", "", "", "", "", ""};
+String displayLabels[9] = {"Name", "User", "Followers", "Following", "Boosts", "Likes", "Downloads", "Prints", "Uptime"};
+String displayValues[9] = {"", "", "", "", "", "", "", "", ""};
+long initialValues[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}; // values at boot
+bool initialValuesSet = false; // flag to track if initial values are captured
 int currentStatIndex = 0;
 bool dataLoaded = false;
 
 // --- Scrolling Variables ---
 int scrollPos = 0;
 bool scrollLeft = true;
+
+// --- Uptime formatting ---
+String formatUptime(unsigned long ms) {
+  unsigned long seconds = ms / 1000;
+  unsigned long minutes = seconds / 60;
+  unsigned long hours = minutes / 60;
+  unsigned long days = hours / 24;
+  
+  seconds %= 60;
+  minutes %= 60;
+  hours %= 24;
+  
+  String result = "";
+  if (days > 0) {
+    result += String(days) + "d ";
+  }
+  if (hours > 0 || days > 0) {
+    result += String(hours) + "h ";
+  }
+  if (minutes > 0 || hours > 0 || days > 0) {
+    result += String(minutes) + "m";
+  } else {
+    result += String(seconds) + "s";
+  }
+  
+  return result;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -71,16 +100,21 @@ void loop() {
     fetchAndParse();
   }
 
-  // 2. Page Rotator (Non-blocking)
+  // 2. Page Rotator (Non-blocking) - now 9 screens including Uptime
   if (millis() - lastStatSwitch >= STAT_SWITCH_INTERVAL) {
     lastStatSwitch = millis();
-    currentStatIndex = (currentStatIndex + 1) % 8;
+    currentStatIndex = (currentStatIndex + 1) % 9;
     Serial.print("Switching to stat index: ");
     Serial.println(currentStatIndex);
 
     // Reset scroll state for the new word
     scrollPos = 0;
     scrollLeft = true;
+
+    // Update uptime value before displaying
+    if (currentStatIndex == 8) {
+      displayValues[8] = formatUptime(millis());
+    }
 
     // Draw the static background/label immediately
     drawStaticUI(displayLabels[currentStatIndex], displayValues[currentStatIndex], currentStatIndex);
@@ -93,6 +127,7 @@ void loop() {
   }
 }
 
+// --- Draw Functions ---
 void drawStaticUI(String label, String value, int index) {
   Serial.print("Drawing UI for index ");
   Serial.print(index);
@@ -107,34 +142,76 @@ void drawStaticUI(String label, String value, int index) {
 
   // Only draw value here if it's NOT a scrolling field
   if (!((index == 0 || index == 1) && value.length() > 12)) {
-    drawValueNormal(value);
+    drawValueNormal(value, index);
   }
 }
 
-void drawValueNormal(String value) {
+// Convert suffixed numbers to long
+long convertToNumber(String str) {
+  str.trim();
+  long multiplier = 1;
+  if (str.endsWith("k") || str.endsWith("K")) {
+    multiplier = 1000;
+    str = str.substring(0, str.length() - 1);
+  } else if (str.endsWith("m") || str.endsWith("M")) {
+    multiplier = 1000000;
+    str = str.substring(0, str.length() - 1);
+  }
+  str.trim();
+  return (long)(str.toFloat() * multiplier);
+}
+
+void drawValueNormal(String value, int index) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
-  Serial.print("Drawing value normally: ");
-  Serial.println(value);
+  // For Uptime screen, just show the value
+  if (index == 8) {
+    tft.drawCentreString(value, 120, 110, 4);
+    return;
+  }
 
+  long current = convertToNumber(value);
+  long initial = initialValues[index];
+  long delta = current - initial;
+
+  bool showDelta = false;
+
+  // Only show delta for numeric stats (Followers, Following, Boosts, Likes, Downloads, Prints)
+  // and only if we have a valid initial value (not 0) and delta is positive
+  if (index >= 2 && index <= 7 && initial > 0 && delta > 0) {
+    showDelta = true;
+  }
+
+  // Build the uptime text for display
+  String uptimeText = formatUptime(millis());
+
+  Serial.print("Drawing value: ");
+  Serial.print(value);
+  if (showDelta) {
+    Serial.print(" (+" + String(delta) + " since boot)");
+  }
+  Serial.println();
+
+  // Handle suffix alignment
   String lower = value;
   lower.toLowerCase();
   bool hasSuffix = (lower.endsWith("k") || lower.endsWith("m"));
 
-  if (hasSuffix) {
+  if (hasSuffix && !showDelta) {
+    // Large display for main value with suffix
     String numPart = value.substring(0, value.length() - 1);
-    numPart.trim();
     String suffixPart = value.substring(value.length() - 1);
-    suffixPart.toUpperCase();
 
     tft.drawCentreString(numPart, 120, 100, 7);
     int w = tft.textWidth(numPart, 7);
     tft.drawString(suffixPart, 125 + (w / 2), 105, 4);
-
-    Serial.print("Number part: ");
-    Serial.print(numPart);
-    Serial.print(", Suffix: ");
-    Serial.println(suffixPart);
+  } else if (showDelta) {
+    // Show value on one line and delta on another
+    tft.drawCentreString(value, 120, 85, 4);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawCentreString("+" + String(delta) + " since boot", 120, 125, 2);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawCentreString("(" + uptimeText + ")", 120, 150, 2);
   } else {
     tft.drawCentreString(value, 120, 110, 4);
   }
@@ -168,11 +245,27 @@ void updateScrollingText(String text) {
   }
 }
 
+// --- Data Fetching ---
+void showFetchingIndicator() {
+  // Draw a small "Fetching..." indicator at the bottom of the screen
+  tft.fillRect(0, 200, 240, 40, TFT_BLACK); // Clear bottom area
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.drawCentreString("Fetching...", 120, 210, 2);
+}
+
+void clearFetchingIndicator() {
+  // Clear the fetching indicator
+  tft.fillRect(0, 200, 240, 40, TFT_BLACK);
+}
+
 bool fetchAndParse() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected, cannot fetch data.");
     return false;
   }
+
+  // Show fetching indicator on display
+  showFetchingIndicator();
 
   Serial.print("Fetching data from URL: ");
   Serial.println(url);
@@ -269,6 +362,19 @@ bool fetchAndParse() {
       }
       displayValues[fieldIndex++] = value;
     }
+  }
+
+  // Capture initial values on first successful fetch
+  if (!initialValuesSet) {
+    Serial.println("Capturing initial values at boot:");
+    for (int i = 2; i < 8; i++) {
+      initialValues[i] = convertToNumber(displayValues[i]);
+      Serial.print("  ");
+      Serial.print(displayLabels[i]);
+      Serial.print(": ");
+      Serial.println(initialValues[i]);
+    }
+    initialValuesSet = true;
   }
 
   Serial.println("\nParsed values:");
