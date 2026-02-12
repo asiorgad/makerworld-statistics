@@ -96,20 +96,19 @@ JohnDoe @johndoe 1.2k 50 234 567 890 123
 | Prints | Total prints (+change) |
 | Uptime | Device running time |
 
-## 🔄 Reset Snapshot Data
+## 🔄 Factory Reset
 
-To clear the 7-day snapshot and start fresh tracking:
+To clear all settings and start fresh:
 
 - **Hold BOOT button** for 2 seconds (during operation)
 - Or **hold BOOT button** while powering on
 
 This clears:
-- ✓ Snapshot data (7-day tracking resets)
+- ✓ Snapshot data
+- ✓ WiFi credentials  
 - ✓ Custom data URL
 
-**WiFi settings are preserved** - no need to reconfigure your network.
-
-> **Tip**: To fully reset WiFi settings, re-flash the device using the web flasher.
+Device restarts in setup mode.
 
 ## ⏱️ Timing Configuration
 

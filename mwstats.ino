@@ -125,17 +125,15 @@ void checkBootButton() {
     unsigned long holdTime = millis() - buttonPressStart;
     
     if (holdTime >= BUTTON_HOLD_MS) {
-      // Held long enough - clear snapshot data only (keep WiFi settings)
-      Serial.println("BOOT button held - clearing snapshot data!");
+      // Held long enough - clear all data including WiFi
+      Serial.println("BOOT button held - clearing all data!");
       
       tft.fillScreen(TFT_BLACK);
       tft.setTextColor(TFT_RED, TFT_BLACK);
-      tft.drawCentreString("Clearing", 120, 90, 4);
-      tft.drawCentreString("snapshot data...", 120, 120, 4);
-      tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      tft.drawCentreString("(WiFi kept)", 120, 160, 2);
+      tft.drawCentreString("Clearing all data", 120, 100, 4);
+      tft.drawCentreString("& WiFi settings...", 120, 130, 2);
       
-      clearSnapshot();
+      clearAllData();
       delay(1500);
       
       tft.fillScreen(TFT_BLACK);
@@ -286,17 +284,15 @@ void setup() {
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
 
-  // Check if BOOT button is pressed during startup to clear snapshot data
+  // Check if BOOT button is pressed during startup to clear all data
   if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
-    Serial.println("BOOT button pressed - clearing snapshot data!");
+    Serial.println("BOOT button pressed - clearing all data!");
     
     tft.setTextColor(TFT_RED, TFT_BLACK);
-    tft.drawCentreString("Clearing", 120, 90, 4);
-    tft.drawCentreString("snapshot data...", 120, 120, 4);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawCentreString("(WiFi kept)", 120, 160, 2);
+    tft.drawCentreString("Clearing all data", 120, 100, 4);
+    tft.drawCentreString("& WiFi settings...", 120, 130, 2);
     
-    clearSnapshot();
+    clearAllData();
     delay(2000);
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
