@@ -503,35 +503,9 @@ void drawValueNormal(String value, int index) {
 
   bool showDelta = false;
 
-  // Debug logging
-  Serial.print("=== DELTA CHECK for ");
-  Serial.print(displayLabels[index]);
-  Serial.println(" ===");
-  Serial.print("  Raw value: '");
-  Serial.print(value);
-  Serial.println("'");
-  Serial.print("  Current (converted): ");
-  Serial.println(current);
-  Serial.print("  Snapshot value: ");
-  Serial.println(snapshot);
-  Serial.print("  Delta: ");
-  Serial.println(delta);
-  Serial.print("  snapshotLoaded: ");
-  Serial.println(snapshotLoaded ? "true" : "false");
-  Serial.print("  snapshotTimestamp: ");
-  Serial.println(snapshotTimestamp);
-
   // Show delta if there's a positive change and we have a valid snapshot
-  // Also show if snapshot value is non-zero (meaning we have real data to compare)
   if (index >= 2 && index <= 7 && snapshotLoaded && snapshot > 0 && delta > 0) {
     showDelta = true;
-    Serial.println("  >>> SHOWING DELTA <<<");
-  } else {
-    Serial.print("  Not showing delta because: ");
-    if (!snapshotLoaded) Serial.print("snapshotLoaded=false ");
-    if (snapshot == 0) Serial.print("snapshot=0 ");
-    if (delta <= 0) Serial.print("delta<=0 ");
-    Serial.println();
   }
 
   // Get snapshot date for display
@@ -600,11 +574,6 @@ void updateScrollingText(String text) {
     scrollSprite.setTextColor(TFT_WHITE);
     scrollSprite.drawString(text, scrollPos, 5, font);
     scrollSprite.pushSprite(20, 100);
-
-    Serial.print("Scrolling text '");
-    Serial.print(text);
-    Serial.print("' at position: ");
-    Serial.println(scrollPos);
   }
 }
 
