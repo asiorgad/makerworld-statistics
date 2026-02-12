@@ -45,20 +45,26 @@ jobs:
 
       - name: Configure TFT_eSPI for GC9A01
         run: |
-          # Find TFT_eSPI library path
-          LIB_PATH="$HOME/Arduino/libraries/TFT_eSPI"
+          # Get Arduino library path from arduino-cli
+          ARDUINO_LIB_PATH=$(arduino-cli config get directories.user)/libraries/TFT_eSPI
           
-          echo "Looking for TFT_eSPI at: $LIB_PATH"
-          ls -la "$LIB_PATH" || echo "Not found at default path"
+          echo "Arduino CLI library path: $ARDUINO_LIB_PATH"
           
-          # Try alternative path
-          if [ ! -d "$LIB_PATH" ]; then
-            LIB_PATH=$(find $HOME -name "TFT_eSPI" -type d 2>/dev/null | head -1)
-            echo "Found at: $LIB_PATH"
+          # Fallback paths
+          if [ ! -d "$ARDUINO_LIB_PATH" ]; then
+            ARDUINO_LIB_PATH="$HOME/Arduino/libraries/TFT_eSPI"
           fi
           
+          if [ ! -d "$ARDUINO_LIB_PATH" ]; then
+            # Search for it
+            ARDUINO_LIB_PATH=$(find $HOME -path "*/libraries/TFT_eSPI" -type d 2>/dev/null | head -1)
+          fi
+          
+          echo "Using TFT_eSPI path: $ARDUINO_LIB_PATH"
+          ls -la "$ARDUINO_LIB_PATH" || { echo "TFT_eSPI not found!"; exit 1; }
+          
           # Create User_Setup.h for GC9A01
-          cat > "$LIB_PATH/User_Setup.h" << 'EOF'
+          cat > "$ARDUINO_LIB_PATH/User_Setup.h" << 'EOF'
           #define GC9A01_DRIVER
           #define TFT_WIDTH  240
           #define TFT_HEIGHT 240
@@ -80,8 +86,7 @@ jobs:
           #define SPI_FREQUENCY  40000000
           EOF
           
-          echo "User_Setup.h created at: $LIB_PATH/User_Setup.h"
-          cat "$LIB_PATH/User_Setup.h"
+          echo "User_Setup.h created successfully"
 
       - name: Compile firmware for ${{ matrix.name }}
         run: |
