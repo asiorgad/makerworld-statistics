@@ -90,19 +90,29 @@ jobs:
 
       - name: Compile firmware for ${{ matrix.name }}
         run: |
-          arduino-cli compile --fqbn ${{ matrix.board }} --output-dir ./build mwstats.ino
+          # Create a properly named sketch folder
+          mkdir -p mwstats
+          cp mwstats.ino mwstats/
+          arduino-cli compile --fqbn ${{ matrix.board }} --output-dir ./build ./mwstats
 
       - name: Rename binary
         run: |
+          ls -la ./build/
           # Find the compiled binary (different naming conventions)
           if [ -f "./build/mwstats.ino.bin" ]; then
             cp ./build/mwstats.ino.bin ./build/${{ matrix.output }}
           elif [ -f "./build/mwstats.ino.merged.bin" ]; then
             cp ./build/mwstats.ino.merged.bin ./build/${{ matrix.output }}
+          elif [ -f "./build/mwstats.bin" ]; then
+            cp ./build/mwstats.bin ./build/${{ matrix.output }}
           else
-            # Find any .bin file
-            find ./build -name "*.bin" -exec cp {} ./build/${{ matrix.output }} \;
+            # Find any .bin file and copy
+            BIN_FILE=$(find ./build -name "*.bin" | head -1)
+            if [ -n "$BIN_FILE" ]; then
+              cp "$BIN_FILE" ./build/${{ matrix.output }}
+            fi
           fi
+          ls -la ./build/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
