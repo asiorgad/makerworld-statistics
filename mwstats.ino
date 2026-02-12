@@ -1,15 +1,17 @@
 #include <WiFi.h>
+#include <WiFiManager.h>
+#include <Preferences.h>
 #include <HTTPClient.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
-#include <Preferences.h>
 #include <time.h>
 
 // --- Configuration ---
+// Default URL (can be overridden via WiFiManager portal)
+char dataUrl[256] = "https://gist.githubusercontent.com/USERNAME/GIST_ID/raw/bambu.txt";
 
-const char* ssid     = "WIFI SSID HERE";
-const char* password = "WIFI PASSWD HERE";
-const char* url      = "https://gist.githubusercontent.com/GITHUB_USER_HERE/GIST_ID_HERE/raw/bambu.txt"; 
+// WiFiManager portal name
+const char* AP_NAME = "MakerStats-Setup";
 
 // NTP Server for time sync
 const char* ntpServer = "pool.ntp.org";
@@ -37,6 +39,17 @@ bool buttonWasPressed = false;
 
 // --- Persistent Storage ---
 Preferences preferences;
+
+// --- WiFiManager ---
+WiFiManager wifiManager;
+WiFiManagerParameter customUrl("url", "Data URL (Gist)", dataUrl, 255);
+bool shouldSaveConfig = false;
+
+// Callback for saving config
+void saveConfigCallback() {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
 
 // --- Display Objects ---
 TFT_eSPI tft = TFT_eSPI();
@@ -112,14 +125,15 @@ void checkBootButton() {
     unsigned long holdTime = millis() - buttonPressStart;
     
     if (holdTime >= BUTTON_HOLD_MS) {
-      // Held long enough - clear data
+      // Held long enough - clear all data including WiFi
       Serial.println("BOOT button held - clearing all data!");
       
       tft.fillScreen(TFT_BLACK);
       tft.setTextColor(TFT_RED, TFT_BLACK);
-      tft.drawCentreString("Clearing data...", 120, 110, 4);
+      tft.drawCentreString("Clearing all data", 120, 100, 4);
+      tft.drawCentreString("& WiFi settings...", 120, 130, 2);
       
-      clearSnapshot();
+      clearAllData();
       delay(1500);
       
       tft.fillScreen(TFT_BLACK);
@@ -139,6 +153,7 @@ void checkBootButton() {
 
 // --- Snapshot Functions ---
 void clearSnapshot() {
+  // Clear snapshot data
   preferences.remove("snapTime");
   preferences.remove("followers");
   preferences.remove("following");
@@ -147,6 +162,9 @@ void clearSnapshot() {
   preferences.remove("downloads");
   preferences.remove("prints");
   
+  // Clear custom URL
+  preferences.remove("dataUrl");
+  
   snapshotTimestamp = 0;
   for (int i = 0; i < 9; i++) {
     snapshotValues[i] = 0;
@@ -154,6 +172,17 @@ void clearSnapshot() {
   snapshotLoaded = false;
   
   Serial.println("Snapshot data cleared!");
+}
+
+void clearAllData() {
+  // Clear snapshot data
+  clearSnapshot();
+  
+  // Clear WiFi credentials
+  Serial.println("Clearing WiFi credentials...");
+  wifiManager.resetSettings();
+  
+  Serial.println("All data cleared!");
 }
 
 void loadSnapshot() {
@@ -241,22 +270,36 @@ void setup() {
 
   // Initialize Preferences
   preferences.begin("makerstats", false);
+  
+  // Load saved URL from preferences (if exists)
+  String savedUrl = preferences.getString("dataUrl", "");
+  if (savedUrl.length() > 0) {
+    savedUrl.toCharArray(dataUrl, sizeof(dataUrl));
+    Serial.print("Loaded saved URL: ");
+    Serial.println(dataUrl);
+  }
 
   // Initialize display first
   tft.init();
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
 
-  // Check if BOOT button is pressed during startup to clear data
+  // Check if BOOT button is pressed during startup to clear all data
   if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
     Serial.println("BOOT button pressed - clearing all data!");
     
     tft.setTextColor(TFT_RED, TFT_BLACK);
-    tft.drawCentreString("Clearing data...", 120, 110, 4);
+    tft.drawCentreString("Clearing all data", 120, 100, 4);
+    tft.drawCentreString("& WiFi settings...", 120, 130, 2);
     
-    clearSnapshot();
+    clearAllData();
     delay(2000);
     tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawCentreString("Data cleared!", 120, 100, 4);
+    tft.drawCentreString("Restarting...", 120, 140, 2);
+    delay(1500);
+    ESP.restart();
   } else {
     loadSnapshot();
   }
@@ -295,23 +338,67 @@ void setup() {
     Serial.println("Sprite created successfully");
   }
 
+  // Setup WiFiManager
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawCentreString("Connecting WiFi...", 120, 110, 2);
+  tft.drawCentreString("Connecting WiFi...", 120, 100, 2);
+  tft.drawCentreString("If not configured,", 120, 130, 2);
+  tft.drawCentreString("connect to:", 120, 150, 2);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.drawCentreString(AP_NAME, 120, 175, 2);
 
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  // WiFiManager settings
+  wifiManager.setDebugOutput(true);
+  wifiManager.setParamsPage(true);  // Enable separate "Setup" page for parameters
+  
+  // Update custom parameter with current URL value
+  customUrl.setValue(dataUrl, 255);
+  
+  // Add custom parameter to WiFiManager
+  wifiManager.addParameter(&customUrl);
+  
+  // Set callback for saving config
+  wifiManager.setSaveConfigCallback(saveConfigCallback);
+  
+  // Set timeout for portal (3 minutes)
+  wifiManager.setConfigPortalTimeout(180);
+  
+  // Try to connect, if fails start config portal
+  Serial.println("Starting WiFiManager...");
+  if (!wifiManager.autoConnect(AP_NAME)) {
+    Serial.println("Failed to connect and hit timeout");
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawCentreString("WiFi Failed!", 120, 100, 4);
+    tft.drawCentreString("Restarting...", 120, 140, 2);
+    delay(3000);
+    ESP.restart();
   }
 
+  // If we get here, we're connected
   Serial.println("\nWiFi Connected!");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
+  
+  // Save custom parameters if needed
+  if (shouldSaveConfig) {
+    Serial.println("Saving custom config...");
+    strcpy(dataUrl, customUrl.getValue());
+    preferences.putString("dataUrl", dataUrl);
+    Serial.print("Saved URL: ");
+    Serial.println(dataUrl);
+    shouldSaveConfig = false;
+  }
+
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.drawCentreString("WiFi Connected!", 120, 100, 2);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawCentreString(WiFi.localIP().toString(), 120, 130, 2);
+  delay(1500);
 
   // Initialize NTP time sync
   tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawCentreString("Syncing time...", 120, 110, 2);
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   
@@ -523,10 +610,10 @@ bool fetchAndParse() {
   showFetchingIndicator();
 
   Serial.print("Fetching data from URL: ");
-  Serial.println(url);
+  Serial.println(dataUrl);
 
   HTTPClient http;
-  http.begin(url);
+  http.begin(dataUrl);
   int httpCode = http.GET();
 
   Serial.print("HTTP response code: ");
