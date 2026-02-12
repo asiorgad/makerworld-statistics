@@ -98,18 +98,27 @@ jobs:
       - name: Rename binary
         run: |
           ls -la ./build/
-          # Find the compiled binary (different naming conventions)
-          if [ -f "./build/mwstats.ino.bin" ]; then
-            cp ./build/mwstats.ino.bin ./build/${{ matrix.output }}
-          elif [ -f "./build/mwstats.ino.merged.bin" ]; then
+          # Prefer merged binary (includes bootloader + partition table + app)
+          # This is required for ESP Web Tools to flash correctly
+          if [ -f "./build/mwstats.ino.merged.bin" ]; then
+            echo "Using merged binary"
             cp ./build/mwstats.ino.merged.bin ./build/${{ matrix.output }}
+          elif [ -f "./build/mwstats.ino.bin" ]; then
+            echo "Using standard binary (may need bootloader)"
+            cp ./build/mwstats.ino.bin ./build/${{ matrix.output }}
           elif [ -f "./build/mwstats.bin" ]; then
             cp ./build/mwstats.bin ./build/${{ matrix.output }}
           else
-            # Find any .bin file and copy
-            BIN_FILE=$(find ./build -name "*.bin" | head -1)
-            if [ -n "$BIN_FILE" ]; then
-              cp "$BIN_FILE" ./build/${{ matrix.output }}
+            # Find merged binary first, then any .bin file
+            MERGED_BIN=$(find ./build -name "*.merged.bin" | head -1)
+            if [ -n "$MERGED_BIN" ]; then
+              echo "Found merged binary: $MERGED_BIN"
+              cp "$MERGED_BIN" ./build/${{ matrix.output }}
+            else
+              BIN_FILE=$(find ./build -name "*.bin" | head -1)
+              if [ -n "$BIN_FILE" ]; then
+                cp "$BIN_FILE" ./build/${{ matrix.output }}
+              fi
             fi
           fi
           ls -la ./build/
