@@ -46,7 +46,16 @@ jobs:
       - name: Configure TFT_eSPI for GC9A01
         run: |
           # Find TFT_eSPI library path
-          LIB_PATH=$(arduino-cli config dump | grep -A1 "directories:" | grep "user:" | awk '{print $2}')/libraries/TFT_eSPI
+          LIB_PATH="$HOME/Arduino/libraries/TFT_eSPI"
+          
+          echo "Looking for TFT_eSPI at: $LIB_PATH"
+          ls -la "$LIB_PATH" || echo "Not found at default path"
+          
+          # Try alternative path
+          if [ ! -d "$LIB_PATH" ]; then
+            LIB_PATH=$(find $HOME -name "TFT_eSPI" -type d 2>/dev/null | head -1)
+            echo "Found at: $LIB_PATH"
+          fi
           
           # Create User_Setup.h for GC9A01
           cat > "$LIB_PATH/User_Setup.h" << 'EOF'
@@ -70,6 +79,9 @@ jobs:
           #define SMOOTH_FONT
           #define SPI_FREQUENCY  40000000
           EOF
+          
+          echo "User_Setup.h created at: $LIB_PATH/User_Setup.h"
+          cat "$LIB_PATH/User_Setup.h"
 
       - name: Compile firmware for ${{ matrix.name }}
         run: |
