@@ -724,3 +724,4 @@ bool fetchAndParse() {
   Serial.println("Data fetch and parse completed successfully.");
   return true;
 }
+
