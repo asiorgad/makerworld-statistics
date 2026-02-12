@@ -93,35 +93,69 @@ jobs:
           # Create a properly named sketch folder
           mkdir -p mwstats
           cp mwstats.ino mwstats/
+          # Compile sketch
           arduino-cli compile --fqbn ${{ matrix.board }} --output-dir ./build ./mwstats
+          
+          echo "=== Build output files ==="
+          ls -la ./build/
+          
+      - name: Create merged binary for ${{ matrix.name }}
+        run: |
+          # Install esptool
+          pip install esptool
+          
+          # Find the bootloader and partition table from the build
+          BOOTLOADER=$(find ./build -name "*.bootloader.bin" | head -1)
+          PARTITIONS=$(find ./build -name "*.partitions.bin" | head -1)
+          APP_BIN=$(find ./build -name "mwstats.ino.bin" | head -1)
+          
+          echo "Bootloader: $BOOTLOADER"
+          echo "Partitions: $PARTITIONS"
+          echo "App: $APP_BIN"
+          
+          # Determine chip type and offsets
+          CHIP="${{ matrix.name }}"
+          if [ "$CHIP" = "ESP32" ]; then
+            CHIP_ARG="esp32"
+            BOOT_OFFSET="0x1000"
+          elif [ "$CHIP" = "ESP32-C3" ]; then
+            CHIP_ARG="esp32c3"
+            BOOT_OFFSET="0x0"
+          elif [ "$CHIP" = "ESP32-S3" ]; then
+            CHIP_ARG="esp32s3"
+            BOOT_OFFSET="0x0"
+          fi
+          
+          # Create merged binary
+          if [ -n "$BOOTLOADER" ] && [ -n "$PARTITIONS" ] && [ -n "$APP_BIN" ]; then
+            esptool.py --chip $CHIP_ARG merge_bin \
+              -o ./build/firmware_merged.bin \
+              --flash_mode dio \
+              --flash_freq 40m \
+              --flash_size 4MB \
+              $BOOT_OFFSET $BOOTLOADER \
+              0x8000 $PARTITIONS \
+              0x10000 $APP_BIN
+            
+            echo "=== Merged binary created ==="
+            ls -la ./build/firmware_merged.bin
+          else
+            echo "ERROR: Missing required files for merge"
+            exit 1
+          fi
 
       - name: Rename binary
         run: |
           ls -la ./build/
-          # Prefer merged binary (includes bootloader + partition table + app)
-          # This is required for ESP Web Tools to flash correctly
-          if [ -f "./build/mwstats.ino.merged.bin" ]; then
-            echo "Using merged binary"
-            cp ./build/mwstats.ino.merged.bin ./build/${{ matrix.output }}
-          elif [ -f "./build/mwstats.ino.bin" ]; then
-            echo "Using standard binary (may need bootloader)"
-            cp ./build/mwstats.ino.bin ./build/${{ matrix.output }}
-          elif [ -f "./build/mwstats.bin" ]; then
-            cp ./build/mwstats.bin ./build/${{ matrix.output }}
+          # Use the merged binary we created (includes bootloader + partition table + app)
+          if [ -f "./build/firmware_merged.bin" ]; then
+            echo "Using our merged binary"
+            cp ./build/firmware_merged.bin ./build/${{ matrix.output }}
           else
-            # Find merged binary first, then any .bin file
-            MERGED_BIN=$(find ./build -name "*.merged.bin" | head -1)
-            if [ -n "$MERGED_BIN" ]; then
-              echo "Found merged binary: $MERGED_BIN"
-              cp "$MERGED_BIN" ./build/${{ matrix.output }}
-            else
-              BIN_FILE=$(find ./build -name "*.bin" | head -1)
-              if [ -n "$BIN_FILE" ]; then
-                cp "$BIN_FILE" ./build/${{ matrix.output }}
-              fi
-            fi
+            echo "ERROR: Merged binary not found!"
+            exit 1
           fi
-          ls -la ./build/
+          ls -la ./build/${{ matrix.output }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
