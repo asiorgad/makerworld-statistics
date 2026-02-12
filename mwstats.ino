@@ -503,8 +503,20 @@ void drawValueNormal(String value, int index) {
 
   bool showDelta = false;
 
+  // Debug logging
+  Serial.print("Index ");
+  Serial.print(index);
+  Serial.print(" (");
+  Serial.print(displayLabels[index]);
+  Serial.print("): current=");
+  Serial.print(current);
+  Serial.print(", snapshot=");
+  Serial.print(snapshot);
+  Serial.print(", delta=");
+  Serial.println(delta);
+
   // Show delta if there's a positive change and we have a valid snapshot
-  if (index >= 2 && index <= 7 && snapshotLoaded && snapshot > 0 && delta > 0) {
+  if (index >= 2 && index <= 7 && snapshotLoaded && delta > 0) {
     showDelta = true;
   }
 
@@ -574,6 +586,11 @@ void updateScrollingText(String text) {
     scrollSprite.setTextColor(TFT_WHITE);
     scrollSprite.drawString(text, scrollPos, 5, font);
     scrollSprite.pushSprite(20, 100);
+
+    Serial.print("Scrolling text '");
+    Serial.print(text);
+    Serial.print("' at position: ");
+    Serial.println(scrollPos);
   }
 }
 
