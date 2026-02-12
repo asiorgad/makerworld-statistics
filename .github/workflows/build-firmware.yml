@@ -113,6 +113,10 @@ jobs:
           echo "Partitions: $PARTITIONS"
           echo "App: $APP_BIN"
           
+          # Find boot_app0.bin from ESP32 core installation
+          BOOT_APP0=$(find ~/.arduino15 -name "boot_app0.bin" 2>/dev/null | head -1)
+          echo "Boot App0: $BOOT_APP0"
+          
           # Determine chip type and offsets
           CHIP="${{ matrix.name }}"
           if [ "$CHIP" = "ESP32" ]; then
@@ -126,8 +130,8 @@ jobs:
             BOOT_OFFSET="0x0"
           fi
           
-          # Create merged binary
-          if [ -n "$BOOTLOADER" ] && [ -n "$PARTITIONS" ] && [ -n "$APP_BIN" ]; then
+          # Create merged binary with boot_app0.bin included
+          if [ -n "$BOOTLOADER" ] && [ -n "$PARTITIONS" ] && [ -n "$APP_BIN" ] && [ -n "$BOOT_APP0" ]; then
             esptool.py --chip $CHIP_ARG merge_bin \
               -o ./build/firmware_merged.bin \
               --flash_mode dio \
@@ -135,12 +139,17 @@ jobs:
               --flash_size 4MB \
               $BOOT_OFFSET $BOOTLOADER \
               0x8000 $PARTITIONS \
+              0xe000 $BOOT_APP0 \
               0x10000 $APP_BIN
             
             echo "=== Merged binary created ==="
             ls -la ./build/firmware_merged.bin
           else
             echo "ERROR: Missing required files for merge"
+            echo "Bootloader: $BOOTLOADER"
+            echo "Partitions: $PARTITIONS"
+            echo "Boot App0: $BOOT_APP0"
+            echo "App: $APP_BIN"
             exit 1
           fi
 
