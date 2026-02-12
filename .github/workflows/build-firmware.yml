@@ -1,0 +1,125 @@
+name: Build Firmware
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '*.ino'
+      - '.github/workflows/build-firmware.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - board: esp32:esp32:esp32
+            name: ESP32
+            output: makerstats.bin
+          - board: esp32:esp32:esp32c3
+            name: ESP32-C3
+            output: makerstats-c3.bin
+          - board: esp32:esp32:esp32s3
+            name: ESP32-S3
+            output: makerstats-s3.bin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "WiFiManager"
+          arduino-cli lib install "TFT_eSPI"
+
+      - name: Configure TFT_eSPI for GC9A01
+        run: |
+          # Find TFT_eSPI library path
+          LIB_PATH=$(arduino-cli config dump | grep -A1 "directories:" | grep "user:" | awk '{print $2}')/libraries/TFT_eSPI
+          
+          # Create User_Setup.h for GC9A01
+          cat > "$LIB_PATH/User_Setup.h" << 'EOF'
+          #define GC9A01_DRIVER
+          #define TFT_WIDTH  240
+          #define TFT_HEIGHT 240
+          #define TFT_MISO -1
+          #define TFT_MOSI 23
+          #define TFT_SCLK 18
+          #define TFT_CS   15
+          #define TFT_DC    2
+          #define TFT_RST   4
+          #define TFT_BL   -1
+          #define LOAD_GLCD
+          #define LOAD_FONT2
+          #define LOAD_FONT4
+          #define LOAD_FONT6
+          #define LOAD_FONT7
+          #define LOAD_FONT8
+          #define LOAD_GFXFF
+          #define SMOOTH_FONT
+          #define SPI_FREQUENCY  40000000
+          EOF
+
+      - name: Compile firmware for ${{ matrix.name }}
+        run: |
+          arduino-cli compile --fqbn ${{ matrix.board }} --output-dir ./build mwstats.ino
+
+      - name: Rename binary
+        run: |
+          # Find the compiled binary (different naming conventions)
+          if [ -f "./build/mwstats.ino.bin" ]; then
+            cp ./build/mwstats.ino.bin ./build/${{ matrix.output }}
+          elif [ -f "./build/mwstats.ino.merged.bin" ]; then
+            cp ./build/mwstats.ino.merged.bin ./build/${{ matrix.output }}
+          else
+            # Find any .bin file
+            find ./build -name "*.bin" -exec cp {} ./build/${{ matrix.output }} \;
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.name }}
+          path: ./build/${{ matrix.output }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Copy firmware to docs folder
+        run: |
+          mkdir -p docs/firmware
+          cp ./artifacts/firmware-ESP32/makerstats.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32-C3/makerstats-c3.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32-S3/makerstats-s3.bin docs/firmware/ || true
+          ls -la docs/firmware/
+
+      - name: Commit and push firmware
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add docs/firmware/
+          git diff --staged --quiet || git commit -m "Update firmware binaries [skip ci]"
+          git push
