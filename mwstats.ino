@@ -7,10 +7,9 @@
 const char* ssid     = "WIFI SSID HERE";
 const char* password = "WIFI PASSWD HERE";
 const char* url      = "https://gist.githubusercontent.com/GITHUB_USER_HERE/GIST_ID_HERE/raw/bambu.txt"; 
-
 // --- Timing Variables ---
 unsigned long lastFetchTime = 0;
-const unsigned long fetchInterval = 600000UL; // 10 minutes
+const unsigned long fetchInterval = 300000UL; // 5 minutes
 unsigned long lastStatSwitch = 0;
 const unsigned long STAT_SWITCH_INTERVAL = 4000; // 4 seconds per screen
 unsigned long lastScroll = 0;
@@ -164,9 +163,16 @@ long convertToNumber(String str) {
 void drawValueNormal(String value, int index) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
-  // For Uptime screen, just show the value
+  // For Name and User screens (index 0 and 1), use font 4 which supports text
+  // Font 7 only supports numbers!
+  if (index == 0 || index == 1) {
+    tft.drawCentreString(value, 120, 100, 4); // Font 4 for text values
+    return;
+  }
+
+  // For Uptime screen, show the value in large font
   if (index == 8) {
-    tft.drawCentreString(value, 120, 110, 4);
+    tft.drawCentreString(value, 120, 100, 4); // Font 4 for uptime (contains letters)
     return;
   }
 
@@ -176,9 +182,21 @@ void drawValueNormal(String value, int index) {
 
   bool showDelta = false;
 
+  // Debug logging
+  Serial.print("Index ");
+  Serial.print(index);
+  Serial.print(" (");
+  Serial.print(displayLabels[index]);
+  Serial.print("): current=");
+  Serial.print(current);
+  Serial.print(", initial=");
+  Serial.print(initial);
+  Serial.print(", delta=");
+  Serial.println(delta);
+
   // Only show delta for numeric stats (Followers, Following, Boosts, Likes, Downloads, Prints)
-  // and only if we have a valid initial value (not 0) and delta is positive
-  if (index >= 2 && index <= 7 && initial > 0 && delta > 0) {
+  // Show delta if there's any positive change (even if initial was 0, as long as initialValuesSet is true)
+  if (index >= 2 && index <= 7 && initialValuesSet && delta > 0) {
     showDelta = true;
   }
 
@@ -198,22 +216,23 @@ void drawValueNormal(String value, int index) {
   bool hasSuffix = (lower.endsWith("k") || lower.endsWith("m"));
 
   if (hasSuffix && !showDelta) {
-    // Large display for main value with suffix
+    // Large display for main value with suffix (font 7 is the largest, numbers only)
     String numPart = value.substring(0, value.length() - 1);
     String suffixPart = value.substring(value.length() - 1);
 
-    tft.drawCentreString(numPart, 120, 100, 7);
+    tft.drawCentreString(numPart, 120, 90, 7);
     int w = tft.textWidth(numPart, 7);
-    tft.drawString(suffixPart, 125 + (w / 2), 105, 4);
+    tft.drawString(suffixPart, 125 + (w / 2), 95, 4);
   } else if (showDelta) {
-    // Show value on one line and delta on another
-    tft.drawCentreString(value, 120, 85, 4);
+    // Show value in large font and delta below
+    tft.drawCentreString(value, 120, 75, 7); // Large font 7 for numeric value
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.drawCentreString("+" + String(delta) + " since boot", 120, 125, 2);
+    tft.drawCentreString("+" + String(delta), 120, 130, 4); // Larger font for delta
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawCentreString("(" + uptimeText + ")", 120, 150, 2);
+    tft.drawCentreString("since boot (" + uptimeText + ")", 120, 165, 2);
   } else {
-    tft.drawCentreString(value, 120, 110, 4);
+    // No suffix, no delta - show numeric value in large font
+    tft.drawCentreString(value, 120, 95, 7); // Font 7 for numbers
   }
 }
 
@@ -394,3 +413,4 @@ bool fetchAndParse() {
   Serial.println("Data fetch and parse completed successfully.");
   return true;
 }
+
