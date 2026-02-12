@@ -2,182 +2,133 @@
 
 A compact ESP32-based display that shows your MakerWorld profile statistics in real-time on a round TFT screen.
 
-## Quick Setup
+![MakerStats Display](https://img.shields.io/badge/ESP32-Ready-green) ![License](https://img.shields.io/badge/License-Open%20Source-blue)
 
-1. **Upload** the sketch to your ESP32
-2. **Connect** to "MakerStats-Setup" WiFi from your phone/computer
-3. **⚠️ IMPORTANT: Go to "Setup" tab FIRST** and configure your Gist URL
-   - The URL must end with `/raw/bambu.txt`
-   - Example: `https://gist.githubusercontent.com/username/gistid/raw/bambu.txt`
-4. **Then go to "WiFi"** tab and select your network
-5. **Save** - device will connect and start displaying stats
+## 🚀 Installation
 
-## Features
+### Option 1: Web Flasher (Recommended)
 
-- **Real-time Statistics Display**: Shows your MakerWorld profile stats including:
-  - Profile Name
-  - Username
-  - Followers count
-  - Following count
-  - Boosts received
-  - Likes received
-  - Downloads count
-  - Prints count
-  - Device Uptime
+The easiest way to install - no software required!
 
-- **WiFi Manager**: Easy WiFi setup via captive portal - no hardcoded credentials!
-  - On first boot, creates "MakerStats-Setup" access point
-  - Connect to configure WiFi and data URL through web interface
-  - Settings are saved and persist across reboots
+1. **Open the Web Flasher**: [https://asiorgad.github.io/makerworld-statistics/docs/](https://asiorgad.github.io/makerworld-statistics/docs/)
+2. **Connect** your ESP32 via USB
+3. **Click** "Install MakerStats"
+4. **Wait** for flashing to complete
 
-- **7-Day Change Tracking**: Displays the increase in each stat over the last 7 days
-  - Shows "+X since [date]" for any stat that has increased
-  - Snapshot is automatically updated every 7 days
-  - Date/time displayed in UTC format
+> **Requirements**: Chrome, Edge, or Opera browser on desktop
 
-- **Data Wipe**: Hold BOOT button for 2 seconds to clear all data
-  - Clears snapshot data
-  - Clears WiFi credentials
-  - Clears custom URL
-  - Device restarts and enters setup mode
+### Option 2: Arduino IDE (Manual)
 
-- **Auto-Refresh**: Fetches new data every 5 minutes
+1. **Install Libraries** in Arduino IDE:
+   - `WiFiManager` by tzapu
+   - `TFT_eSPI` by Bodmer
 
-- **Visual Feedback**: Shows "Fetching..." indicator when updating data
+2. **Configure TFT_eSPI** - Edit `User_Setup.h` in the TFT_eSPI library folder:
+   ```cpp
+   #define GC9A01_DRIVER
+   #define TFT_WIDTH  240
+   #define TFT_HEIGHT 240
+   #define TFT_MISO -1
+   #define TFT_MOSI 23
+   #define TFT_SCLK 18
+   #define TFT_CS   15
+   #define TFT_DC    2
+   #define TFT_RST   4
+   ```
 
-- **Rotating Display**: Cycles through all 9 screens every 4 seconds
+3. **Upload** `mwstats.ino` to your ESP32
 
-## Hardware Requirements
+## ⚙️ First-Time Setup
 
-- ESP32 development board
-- GC9A01 round TFT display (240x240 pixels)
-- WiFi connection
+After flashing, configure your device:
 
-## Libraries Required
+1. **Connect** to "MakerStats-Setup" WiFi from your phone/computer
+2. **⚠️ Go to "Setup" tab FIRST** and enter your Gist URL:
+   ```
+   https://gist.githubusercontent.com/USERNAME/GIST_ID/raw/bambu.txt
+   ```
+3. **Then go to "WiFi" tab** and select your network
+4. **Save** - device will connect and start displaying stats
 
-- `WiFi.h` - ESP32 WiFi connectivity
-- `HTTPClient.h` - HTTP requests
-- `SPI.h` - SPI communication
-- `TFT_eSPI.h` - TFT display driver
-- `Preferences.h` - Persistent storage
-- `WiFiManager.h` - WiFi configuration portal
+## 📊 Features
 
-## Installation
+- **Real-time Statistics**: Displays followers, likes, downloads, prints, and more
+- **7-Day Change Tracking**: Shows "+X since [date]" for increasing stats
+- **WiFi Manager**: Easy setup via captive portal - no hardcoded credentials
+- **Auto-Refresh**: Updates every 5 minutes
+- **Rotating Display**: Cycles through 9 screens every 4 seconds
+- **Factory Reset**: Hold BOOT button for 2 seconds to wipe all data
 
-1. Install the required libraries in Arduino IDE
-2. Configure TFT_eSPI for your display (see Pin Configuration below)
-3. Upload the sketch to your ESP32
-4. On first boot, connect to "MakerStats-Setup" WiFi network
-5. Configure your WiFi credentials and data URL in the captive portal
+## 🔧 Hardware Requirements
 
-## First-Time Setup
+| Component | Specification |
+|-----------|---------------|
+| Board | ESP32, ESP32-C3, or ESP32-S3 |
+| Display | GC9A01 round TFT (240x240 pixels) |
+| Connection | WiFi 2.4GHz |
 
-1. Power on the device
-2. The startup screen shows for 3 seconds with instructions
-3. Connect to the "MakerStats-Setup" WiFi network from your phone/computer
-4. A captive portal will open automatically (or navigate to 192.168.4.1)
-5. Select your WiFi network and enter the password
-6. Enter your data URL (Gist URL)
-7. Click Save - the device will connect and start displaying stats
+## 📝 Data Source
 
-## Data Wipe / Factory Reset
-
-To clear all settings and start fresh:
-
-**During startup:**
-- Hold the BOOT button while powering on
-
-**During operation:**
-- Hold the BOOT button for 2 seconds
-
-This will:
-- Clear all snapshot data
-- Clear WiFi credentials
-- Clear the custom data URL
-- Restart the device in setup mode
-
-## Data Source
-
-The device fetches statistics from a text file hosted online (e.g., GitHub Gist). The expected format is space-separated values:
+Create a GitHub Gist with your MakerWorld stats in this format:
 
 ```
 Name Username Followers Following Boosts Likes Downloads Prints
 ```
 
-Example:
+**Example:**
 ```
 JohnDoe @johndoe 1.2k 50 234 567 890 123
 ```
 
-Supports `k` (thousands) and `m` (millions) suffixes for large numbers.
+> Supports `k` (thousands) and `m` (millions) suffixes for large numbers.
 
-## Display Screens
+## 📺 Display Screens
 
 | Screen | Description |
 |--------|-------------|
 | Name | Profile display name |
 | User | Username/handle |
-| Followers | Number of followers |
-| Following | Number of accounts following |
-| Boosts | Total boosts received |
-| Likes | Total likes received |
-| Downloads | Total model downloads |
-| Prints | Total prints of your models |
-| Uptime | How long the device has been running |
+| Followers | Number of followers (+change) |
+| Following | Number following |
+| Boosts | Total boosts received (+change) |
+| Likes | Total likes received (+change) |
+| Downloads | Total downloads (+change) |
+| Prints | Total prints (+change) |
+| Uptime | Device running time |
 
-## How It Works
+## 🔄 Factory Reset
 
-1. **Boot**: Device shows startup screen with last snapshot date
-2. **Connect**: Uses WiFiManager to connect (or setup if not configured)
-3. **Sync Time**: Synchronizes with NTP server (UTC time)
-4. **Fetch**: Gets initial statistics from configured URL
-5. **Snapshot**: Saves baseline values (first run or every 7 days)
-6. **Display**: Rotates through all stats every 4 seconds
-7. **Refresh**: Every 5 minutes, fetches new data from the server
-8. **Compare**: Shows the difference between current and snapshot values
+To clear all settings and start fresh:
 
-## Display Format
+- **Hold BOOT button** for 2 seconds (during operation)
+- Or **hold BOOT button** while powering on
 
-### Normal stat (no change):
-```
-Downloads
-890
-```
+This clears:
+- ✓ Snapshot data
+- ✓ WiFi credentials  
+- ✓ Custom data URL
 
-### Stat with increase:
-```
-Downloads
-892
-+2
-since 05/02 14:30 UTC
-```
+Device restarts in setup mode.
 
-### Large numbers with suffix:
-```
-Followers
-1.2k
-```
+## ⏱️ Timing Configuration
 
-## Timing Configuration
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Data refresh | 5 min | How often stats are fetched |
+| Screen rotation | 4 sec | Time per stat screen |
+| Snapshot interval | 7 days | Change tracking period |
+| Button hold | 2 sec | Time to trigger reset |
 
-```cpp
-const unsigned long fetchInterval = 300000UL;        // Data refresh: 5 minutes
-const unsigned long STAT_SWITCH_INTERVAL = 4000;     // Screen rotation: 4 seconds
-const int SCROLL_SPEED = 30;                         // Text scroll speed: 30ms
-const int SNAPSHOT_INTERVAL_DAYS = 7;                // Snapshot interval: 7 days
-const unsigned long BUTTON_HOLD_MS = 2000;           // Button hold time: 2 seconds
-```
+## 📌 Pin Configuration
 
-## Pin Configuration
+The BOOT button uses GPIO 0 (standard on most ESP32 boards).
 
-Configure your TFT_eSPI library's `User_Setup.h` for the GC9A01 display and your specific ESP32 pin connections.
+For custom pin configurations, edit the TFT_eSPI `User_Setup.h` file.
 
-The BOOT button is on GPIO 0 (standard on most ESP32 boards).
-
-## License
+## 📄 License
 
 Open source - feel free to modify and share!
 
-## Author
+## 👤 Author
 
 Created for displaying MakerWorld statistics on a desktop display.
