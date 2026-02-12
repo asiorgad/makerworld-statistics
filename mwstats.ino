@@ -2,11 +2,20 @@
 #include <HTTPClient.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <Preferences.h>
+#include <time.h>
 
+// --- Configuration ---
 
 const char* ssid     = "WIFI SSID HERE";
 const char* password = "WIFI PASSWD HERE";
 const char* url      = "https://gist.githubusercontent.com/GITHUB_USER_HERE/GIST_ID_HERE/raw/bambu.txt"; 
+
+// NTP Server for time sync
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 0;  // UTC time
+const int daylightOffset_sec = 0;  // No daylight saving
+
 // --- Timing Variables ---
 unsigned long lastFetchTime = 0;
 const unsigned long fetchInterval = 300000UL; // 5 minutes
@@ -15,6 +24,20 @@ const unsigned long STAT_SWITCH_INTERVAL = 4000; // 4 seconds per screen
 unsigned long lastScroll = 0;
 const int SCROLL_SPEED = 30; // ms between movement
 
+// --- Snapshot interval (7 days) ---
+const unsigned long SNAPSHOT_INTERVAL_MS = 604800000UL; // 7 days in milliseconds
+const int SNAPSHOT_INTERVAL_DAYS = 7;
+
+// --- Boot button for clearing data ---
+const int BOOT_BUTTON_PIN = 0; // GPIO 0 is the BOOT button on most ESP32 boards
+const unsigned long BUTTON_DEBOUNCE_MS = 50; // Debounce time
+const unsigned long BUTTON_HOLD_MS = 2000; // Hold time to trigger clear (2 seconds)
+unsigned long buttonPressStart = 0;
+bool buttonWasPressed = false;
+
+// --- Persistent Storage ---
+Preferences preferences;
+
 // --- Display Objects ---
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite scrollSprite = TFT_eSprite(&tft);
@@ -22,8 +45,9 @@ TFT_eSprite scrollSprite = TFT_eSprite(&tft);
 // --- Data Variables ---
 String displayLabels[9] = {"Name", "User", "Followers", "Following", "Boosts", "Likes", "Downloads", "Prints", "Uptime"};
 String displayValues[9] = {"", "", "", "", "", "", "", "", ""};
-long initialValues[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}; // values at boot
-bool initialValuesSet = false; // flag to track if initial values are captured
+long snapshotValues[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0}; // values from last snapshot
+unsigned long snapshotTimestamp = 0; // Unix timestamp when snapshot was saved
+bool snapshotLoaded = false;
 int currentStatIndex = 0;
 bool dataLoaded = false;
 
@@ -31,7 +55,7 @@ bool dataLoaded = false;
 int scrollPos = 0;
 bool scrollLeft = true;
 
-// --- Uptime formatting ---
+// --- Time formatting ---
 String formatUptime(unsigned long ms) {
   unsigned long seconds = ms / 1000;
   unsigned long minutes = seconds / 60;
@@ -58,12 +82,209 @@ String formatUptime(unsigned long ms) {
   return result;
 }
 
+String formatDate(unsigned long timestamp) {
+  if (timestamp == 0) return "N/A";
+  
+  time_t t = (time_t)timestamp;
+  struct tm* timeinfo = gmtime(&t);  // Use UTC time
+  
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%d/%m %H:%M UTC", timeinfo);
+  return String(buffer);
+}
+
+unsigned long getCurrentTimestamp() {
+  time_t now;
+  time(&now);
+  return (unsigned long)now;
+}
+
+// --- Boot Button Check (runtime) ---
+void checkBootButton() {
+  bool buttonPressed = (digitalRead(BOOT_BUTTON_PIN) == LOW);
+  
+  if (buttonPressed && !buttonWasPressed) {
+    // Button just pressed
+    buttonPressStart = millis();
+    buttonWasPressed = true;
+  } else if (buttonPressed && buttonWasPressed) {
+    // Button being held
+    unsigned long holdTime = millis() - buttonPressStart;
+    
+    if (holdTime >= BUTTON_HOLD_MS) {
+      // Held long enough - clear data
+      Serial.println("BOOT button held - clearing all data!");
+      
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+      tft.drawCentreString("Clearing data...", 120, 110, 4);
+      
+      clearSnapshot();
+      delay(1500);
+      
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.drawCentreString("Data cleared!", 120, 100, 4);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.drawCentreString("Restarting...", 120, 140, 2);
+      delay(1500);
+      
+      ESP.restart();
+    }
+  } else if (!buttonPressed && buttonWasPressed) {
+    // Button released
+    buttonWasPressed = false;
+  }
+}
+
+// --- Snapshot Functions ---
+void clearSnapshot() {
+  preferences.remove("snapTime");
+  preferences.remove("followers");
+  preferences.remove("following");
+  preferences.remove("boosts");
+  preferences.remove("likes");
+  preferences.remove("downloads");
+  preferences.remove("prints");
+  
+  snapshotTimestamp = 0;
+  for (int i = 0; i < 9; i++) {
+    snapshotValues[i] = 0;
+  }
+  snapshotLoaded = false;
+  
+  Serial.println("Snapshot data cleared!");
+}
+
+void loadSnapshot() {
+  snapshotTimestamp = preferences.getULong("snapTime", 0);
+  snapshotValues[2] = preferences.getLong("followers", 0);
+  snapshotValues[3] = preferences.getLong("following", 0);
+  snapshotValues[4] = preferences.getLong("boosts", 0);
+  snapshotValues[5] = preferences.getLong("likes", 0);
+  snapshotValues[6] = preferences.getLong("downloads", 0);
+  snapshotValues[7] = preferences.getLong("prints", 0);
+  
+  if (snapshotTimestamp > 0) {
+    snapshotLoaded = true;
+    Serial.println("Loaded snapshot from " + formatDate(snapshotTimestamp));
+    for (int i = 2; i < 8; i++) {
+      Serial.print("  ");
+      Serial.print(displayLabels[i]);
+      Serial.print(": ");
+      Serial.println(snapshotValues[i]);
+    }
+  } else {
+    Serial.println("No snapshot found in storage");
+  }
+}
+
+void saveSnapshot() {
+  unsigned long currentTime = getCurrentTimestamp();
+  
+  preferences.putULong("snapTime", currentTime);
+  preferences.putLong("followers", convertToNumber(displayValues[2]));
+  preferences.putLong("following", convertToNumber(displayValues[3]));
+  preferences.putLong("boosts", convertToNumber(displayValues[4]));
+  preferences.putLong("likes", convertToNumber(displayValues[5]));
+  preferences.putLong("downloads", convertToNumber(displayValues[6]));
+  preferences.putLong("prints", convertToNumber(displayValues[7]));
+  
+  snapshotTimestamp = currentTime;
+  for (int i = 2; i < 8; i++) {
+    snapshotValues[i] = convertToNumber(displayValues[i]);
+  }
+  snapshotLoaded = true;
+  
+  Serial.println("Saved new snapshot at " + formatDate(currentTime));
+}
+
+void checkAndUpdateSnapshot() {
+  unsigned long currentTime = getCurrentTimestamp();
+  
+  // First run - no snapshot exists
+  if (snapshotTimestamp == 0) {
+    Serial.println("First run - saving initial snapshot");
+    saveSnapshot();
+    return;
+  }
+  
+  // Check if 7 days have passed since last snapshot
+  unsigned long elapsed = currentTime - snapshotTimestamp;
+  if (elapsed >= (SNAPSHOT_INTERVAL_DAYS * 24 * 60 * 60)) {
+    Serial.println("7 days passed - updating snapshot");
+    saveSnapshot();
+  }
+}
+
+// Convert suffixed numbers to long
+long convertToNumber(String str) {
+  str.trim();
+  long multiplier = 1;
+  if (str.endsWith("k") || str.endsWith("K")) {
+    multiplier = 1000;
+    str = str.substring(0, str.length() - 1);
+  } else if (str.endsWith("m") || str.endsWith("M")) {
+    multiplier = 1000000;
+    str = str.substring(0, str.length() - 1);
+  }
+  str.trim();
+  return (long)(str.toFloat() * multiplier);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Setup started");
 
+  // Initialize boot button pin
+  pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+
+  // Initialize Preferences
+  preferences.begin("makerstats", false);
+
+  // Initialize display first
   tft.init();
   tft.setRotation(0);
+  tft.fillScreen(TFT_BLACK);
+
+  // Check if BOOT button is pressed during startup to clear data
+  if (digitalRead(BOOT_BUTTON_PIN) == LOW) {
+    Serial.println("BOOT button pressed - clearing all data!");
+    
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawCentreString("Clearing data...", 120, 110, 4);
+    
+    clearSnapshot();
+    delay(2000);
+    tft.fillScreen(TFT_BLACK);
+  } else {
+    loadSnapshot();
+  }
+
+  // Show startup info screen
+  tft.fillScreen(TFT_BLACK);
+  tft.drawCircle(120, 120, 119, 0x3186);
+  
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.drawCentreString("MakerStats", 120, 30, 4);
+  
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (snapshotLoaded && snapshotTimestamp > 0) {
+    tft.drawCentreString("Last snapshot:", 120, 70, 2);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawCentreString(formatDate(snapshotTimestamp), 120, 90, 2);
+  } else {
+    tft.drawCentreString("No saved data", 120, 80, 2);
+  }
+  
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.drawCentreString("Hold BOOT button", 120, 130, 2);
+  tft.drawCentreString("for 2s to wipe data", 120, 150, 2);
+  
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawCentreString("Starting in 3s...", 120, 190, 2);
+  
+  delay(3000);
   tft.fillScreen(TFT_BLACK);
 
   // Initialize Sprite (Width 200 to stay within the round screen center)
@@ -89,17 +310,42 @@ void setup() {
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
 
+  // Initialize NTP time sync
+  tft.fillScreen(TFT_BLACK);
+  tft.drawCentreString("Syncing time...", 120, 110, 2);
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  
+  // Wait for time to sync
+  struct tm timeinfo;
+  int retries = 0;
+  while (!getLocalTime(&timeinfo) && retries < 10) {
+    delay(500);
+    retries++;
+  }
+  
+  if (retries < 10) {
+    Serial.println("Time synchronized!");
+    char timeStr[30];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    Serial.println(timeStr);
+  } else {
+    Serial.println("Failed to sync time");
+  }
+
   fetchAndParse();
 }
 
 void loop() {
+  // 0. Check boot button for data clearing
+  checkBootButton();
+  
   // 1. Periodic Data Refresh
   if (millis() - lastFetchTime >= fetchInterval) {
     Serial.println("Refreshing data from server...");
     fetchAndParse();
   }
 
-  // 2. Page Rotator (Non-blocking) - now 9 screens including Uptime
+  // 2. Page Rotator (Non-blocking) - 9 screens including Uptime
   if (millis() - lastStatSwitch >= STAT_SWITCH_INTERVAL) {
     lastStatSwitch = millis();
     currentStatIndex = (currentStatIndex + 1) % 9;
@@ -137,7 +383,7 @@ void drawStaticUI(String label, String value, int index) {
   tft.drawCircle(120, 120, 119, 0x3186); // Decorative border
 
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.drawCentreString(label, 120, 50, 4);
+  tft.drawCentreString(label, 120, 35, 4);  // Moved title up from 50 to 35
 
   // Only draw value here if it's NOT a scrolling field
   if (!((index == 0 || index == 1) && value.length() > 12)) {
@@ -145,40 +391,24 @@ void drawStaticUI(String label, String value, int index) {
   }
 }
 
-// Convert suffixed numbers to long
-long convertToNumber(String str) {
-  str.trim();
-  long multiplier = 1;
-  if (str.endsWith("k") || str.endsWith("K")) {
-    multiplier = 1000;
-    str = str.substring(0, str.length() - 1);
-  } else if (str.endsWith("m") || str.endsWith("M")) {
-    multiplier = 1000000;
-    str = str.substring(0, str.length() - 1);
-  }
-  str.trim();
-  return (long)(str.toFloat() * multiplier);
-}
-
 void drawValueNormal(String value, int index) {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
   // For Name and User screens (index 0 and 1), use font 4 which supports text
-  // Font 7 only supports numbers!
   if (index == 0 || index == 1) {
-    tft.drawCentreString(value, 120, 100, 4); // Font 4 for text values
+    tft.drawCentreString(value, 120, 110, 4);  // Moved down from 100 to 110
     return;
   }
 
-  // For Uptime screen, show the value in large font
+  // For Uptime screen, show the value
   if (index == 8) {
-    tft.drawCentreString(value, 120, 100, 4); // Font 4 for uptime (contains letters)
+    tft.drawCentreString(value, 120, 110, 4);  // Moved down from 100 to 110
     return;
   }
 
   long current = convertToNumber(value);
-  long initial = initialValues[index];
-  long delta = current - initial;
+  long snapshot = snapshotValues[index];
+  long delta = current - snapshot;
 
   bool showDelta = false;
 
@@ -189,24 +419,23 @@ void drawValueNormal(String value, int index) {
   Serial.print(displayLabels[index]);
   Serial.print("): current=");
   Serial.print(current);
-  Serial.print(", initial=");
-  Serial.print(initial);
+  Serial.print(", snapshot=");
+  Serial.print(snapshot);
   Serial.print(", delta=");
   Serial.println(delta);
 
-  // Only show delta for numeric stats (Followers, Following, Boosts, Likes, Downloads, Prints)
-  // Show delta if there's any positive change (even if initial was 0, as long as initialValuesSet is true)
-  if (index >= 2 && index <= 7 && initialValuesSet && delta > 0) {
+  // Show delta if there's a positive change and we have a valid snapshot
+  if (index >= 2 && index <= 7 && snapshotLoaded && delta > 0) {
     showDelta = true;
   }
 
-  // Build the uptime text for display
-  String uptimeText = formatUptime(millis());
+  // Get snapshot date for display
+  String snapshotDate = formatDate(snapshotTimestamp);
 
   Serial.print("Drawing value: ");
   Serial.print(value);
   if (showDelta) {
-    Serial.print(" (+" + String(delta) + " since boot)");
+    Serial.print(" (+" + String(delta) + " since " + snapshotDate + ")");
   }
   Serial.println();
 
@@ -216,23 +445,33 @@ void drawValueNormal(String value, int index) {
   bool hasSuffix = (lower.endsWith("k") || lower.endsWith("m"));
 
   if (hasSuffix && !showDelta) {
-    // Large display for main value with suffix (font 7 is the largest, numbers only)
+    // Large display for main value with suffix
     String numPart = value.substring(0, value.length() - 1);
     String suffixPart = value.substring(value.length() - 1);
 
-    tft.drawCentreString(numPart, 120, 90, 7);
+    tft.drawCentreString(numPart, 120, 100, 7);  // Moved down from 90 to 100
     int w = tft.textWidth(numPart, 7);
-    tft.drawString(suffixPart, 125 + (w / 2), 95, 4);
+    tft.drawString(suffixPart, 125 + (w / 2), 105, 4);  // Moved down from 95 to 105
   } else if (showDelta) {
-    // Show value in large font and delta below
-    tft.drawCentreString(value, 120, 75, 7); // Large font 7 for numeric value
+    // Show value in large font and delta below with date
+    // Handle suffix separately since Font 7 only supports numbers
+    if (hasSuffix) {
+      String numPart = value.substring(0, value.length() - 1);
+      String suffixPart = value.substring(value.length() - 1);
+      
+      tft.drawCentreString(numPart, 120, 80, 7);  // Moved down from 70 to 80
+      int w = tft.textWidth(numPart, 7);
+      tft.drawString(suffixPart, 125 + (w / 2), 85, 4);  // Moved down from 75 to 85
+    } else {
+      tft.drawCentreString(value, 120, 80, 7);  // Moved down from 70 to 80
+    }
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.drawCentreString("+" + String(delta), 120, 130, 4); // Larger font for delta
+    tft.drawCentreString("+" + String(delta), 120, 135, 4);  // Moved down from 125 to 135
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawCentreString("since boot (" + uptimeText + ")", 120, 165, 2);
+    tft.drawCentreString("since " + snapshotDate, 120, 170, 2);  // Moved down from 160 to 170
   } else {
     // No suffix, no delta - show numeric value in large font
-    tft.drawCentreString(value, 120, 95, 7); // Font 7 for numbers
+    tft.drawCentreString(value, 120, 105, 7);  // Moved down from 95 to 105
   }
 }
 
@@ -255,7 +494,7 @@ void updateScrollingText(String text) {
     scrollSprite.fillSprite(TFT_BLACK);
     scrollSprite.setTextColor(TFT_WHITE);
     scrollSprite.drawString(text, scrollPos, 5, font);
-    scrollSprite.pushSprite(20, 100); // Centered on the GC9A01
+    scrollSprite.pushSprite(20, 100);
 
     Serial.print("Scrolling text '");
     Serial.print(text);
@@ -266,14 +505,12 @@ void updateScrollingText(String text) {
 
 // --- Data Fetching ---
 void showFetchingIndicator() {
-  // Draw a small "Fetching..." indicator at the bottom of the screen
-  tft.fillRect(0, 200, 240, 40, TFT_BLACK); // Clear bottom area
+  tft.fillRect(0, 200, 240, 40, TFT_BLACK);
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
   tft.drawCentreString("Fetching...", 120, 210, 2);
 }
 
 void clearFetchingIndicator() {
-  // Clear the fetching indicator
   tft.fillRect(0, 200, 240, 40, TFT_BLACK);
 }
 
@@ -283,7 +520,6 @@ bool fetchAndParse() {
     return false;
   }
 
-  // Show fetching indicator on display
   showFetchingIndicator();
 
   Serial.print("Fetching data from URL: ");
@@ -300,7 +536,6 @@ bool fetchAndParse() {
     Serial.print("Failed to fetch data. HTTP code: ");
     Serial.println(httpCode);
 
-    // Show error on TFT
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.drawCentreString("Data fetch failed!", 120, 100, 4);
@@ -383,18 +618,8 @@ bool fetchAndParse() {
     }
   }
 
-  // Capture initial values on first successful fetch
-  if (!initialValuesSet) {
-    Serial.println("Capturing initial values at boot:");
-    for (int i = 2; i < 8; i++) {
-      initialValues[i] = convertToNumber(displayValues[i]);
-      Serial.print("  ");
-      Serial.print(displayLabels[i]);
-      Serial.print(": ");
-      Serial.println(initialValues[i]);
-    }
-    initialValuesSet = true;
-  }
+  // Check if we need to save/update snapshot
+  checkAndUpdateSnapshot();
 
   Serial.println("\nParsed values:");
   for (int i = 0; i < 8; i++) {
@@ -406,11 +631,9 @@ bool fetchAndParse() {
   lastFetchTime = millis();
   dataLoaded = true;
 
-  // Update display
   drawStaticUI(displayLabels[currentStatIndex], displayValues[currentStatIndex], currentStatIndex);
 
   http.end();
   Serial.println("Data fetch and parse completed successfully.");
   return true;
 }
-
