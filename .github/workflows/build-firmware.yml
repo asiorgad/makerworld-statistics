@@ -101,6 +101,10 @@ jobs:
           
       - name: Prepare firmware components for ${{ matrix.name }}
         run: |
+          # FIX: Extract individual component files instead of creating a merged binary.
+          # Web flasher needs separate files to flash each component at its correct offset.
+          # Previously, merged binary at offset 0 put bootloader at wrong address, causing crashes.
+          
           # Find the bootloader, partition table, and app binary from the build
           BOOTLOADER=$(find ./build -name "*.bootloader.bin" | head -1)
           PARTITIONS=$(find ./build -name "*.partitions.bin" | head -1)

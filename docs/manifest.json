@@ -4,9 +4,11 @@
   "home_assistant_domain": "",
   "funding_url": "",
   "new_install_prompt_erase": true,
+  "_comment": "FIX: Flash individual components at correct offsets instead of merged binary at offset 0. This ensures bootloader, partitions, boot_app0, and app are placed at their proper memory locations, preventing boot crashes.",
   "builds": [
     {
       "chipFamily": "ESP32",
+      "_comment": "ESP32 bootloader must be at 0x1000 (4096), not 0x0",
       "parts": [
         { "path": "firmware/makerstats.bootloader.bin", "offset": 4096 },
         { "path": "firmware/makerstats.partitions.bin", "offset": 32768 },
