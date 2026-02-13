@@ -8,19 +8,28 @@
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "firmware/makerstats.bin", "offset": 0 }
+        { "path": "firmware/makerstats.bootloader.bin", "offset": 4096 },
+        { "path": "firmware/makerstats.partitions.bin", "offset": 32768 },
+        { "path": "firmware/boot_app0.bin", "offset": 57344 },
+        { "path": "firmware/makerstats.bin", "offset": 65536 }
       ]
     },
     {
       "chipFamily": "ESP32-C3",
       "parts": [
-        { "path": "firmware/makerstats-c3.bin", "offset": 0 }
+        { "path": "firmware/makerstats-c3.bootloader.bin", "offset": 0 },
+        { "path": "firmware/makerstats-c3.partitions.bin", "offset": 32768 },
+        { "path": "firmware/boot_app0.bin", "offset": 57344 },
+        { "path": "firmware/makerstats-c3.bin", "offset": 65536 }
       ]
     },
     {
       "chipFamily": "ESP32-S3",
       "parts": [
-        { "path": "firmware/makerstats-s3.bin", "offset": 0 }
+        { "path": "firmware/makerstats-s3.bootloader.bin", "offset": 0 },
+        { "path": "firmware/makerstats-s3.partitions.bin", "offset": 32768 },
+        { "path": "firmware/boot_app0.bin", "offset": 57344 },
+        { "path": "firmware/makerstats-s3.bin", "offset": 65536 }
       ]
     }
   ]

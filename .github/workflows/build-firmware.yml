@@ -99,12 +99,9 @@ EOF
           echo "=== Build output files ==="
           ls -la ./build/
           
-      - name: Create merged binary for ${{ matrix.name }}
+      - name: Prepare firmware components for ${{ matrix.name }}
         run: |
-          # Install esptool
-          pip install esptool
-          
-          # Find the bootloader and partition table from the build
+          # Find the bootloader, partition table, and app binary from the build
           BOOTLOADER=$(find ./build -name "*.bootloader.bin" | head -1)
           PARTITIONS=$(find ./build -name "*.partitions.bin" | head -1)
           APP_BIN=$(find ./build -name "mwstats.ino.bin" | head -1)
@@ -117,35 +114,28 @@ EOF
           BOOT_APP0=$(find ~/.arduino15 -name "boot_app0.bin" 2>/dev/null | head -1)
           echo "Boot App0: $BOOT_APP0"
           
-          # Determine chip type and offsets
-          CHIP="${{ matrix.name }}"
-          if [ "$CHIP" = "ESP32" ]; then
-            CHIP_ARG="esp32"
-            BOOT_OFFSET="0x1000"
-          elif [ "$CHIP" = "ESP32-C3" ]; then
-            CHIP_ARG="esp32c3"
-            BOOT_OFFSET="0x0"
-          elif [ "$CHIP" = "ESP32-S3" ]; then
-            CHIP_ARG="esp32s3"
-            BOOT_OFFSET="0x0"
-          fi
-          
-          # Create merged binary with boot_app0.bin included
+          # Copy and rename files for web flasher
           if [ -n "$BOOTLOADER" ] && [ -n "$PARTITIONS" ] && [ -n "$APP_BIN" ] && [ -n "$BOOT_APP0" ]; then
-            esptool.py --chip $CHIP_ARG merge_bin \
-              -o ./build/firmware_merged.bin \
-              --flash_mode dio \
-              --flash_freq 40m \
-              --flash_size 4MB \
-              $BOOT_OFFSET $BOOTLOADER \
-              0x8000 $PARTITIONS \
-              0xe000 $BOOT_APP0 \
-              0x10000 $APP_BIN
+            # Determine output prefix based on board
+            if [ "${{ matrix.name }}" = "ESP32" ]; then
+              PREFIX="makerstats"
+            elif [ "${{ matrix.name }}" = "ESP32-C3" ]; then
+              PREFIX="makerstats-c3"
+            elif [ "${{ matrix.name }}" = "ESP32-S3" ]; then
+              PREFIX="makerstats-s3"
+            fi
             
-            echo "=== Merged binary created ==="
-            ls -la ./build/firmware_merged.bin
+            # Copy component files with proper names
+            cp "$BOOTLOADER" "./build/${PREFIX}.bootloader.bin"
+            cp "$PARTITIONS" "./build/${PREFIX}.partitions.bin"
+            cp "$APP_BIN" "./build/${PREFIX}.bin"
+            cp "$BOOT_APP0" "./build/boot_app0.bin"
+            
+            echo "=== Firmware components prepared ==="
+            ls -la ./build/${PREFIX}*
+            ls -la ./build/boot_app0.bin
           else
-            echo "ERROR: Missing required files for merge"
+            echo "ERROR: Missing required files"
             echo "Bootloader: $BOOTLOADER"
             echo "Partitions: $PARTITIONS"
             echo "Boot App0: $BOOT_APP0"
@@ -153,24 +143,14 @@ EOF
             exit 1
           fi
 
-      - name: Rename binary
-        run: |
-          ls -la ./build/
-          # Use the merged binary we created (includes bootloader + partition table + app)
-          if [ -f "./build/firmware_merged.bin" ]; then
-            echo "Using our merged binary"
-            cp ./build/firmware_merged.bin ./build/${{ matrix.output }}
-          else
-            echo "ERROR: Merged binary not found!"
-            exit 1
-          fi
-          ls -la ./build/${{ matrix.output }}
-
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.name }}
-          path: ./build/${{ matrix.output }}
+          path: |
+            ./build/*.bootloader.bin
+            ./build/*.partitions.bin
+            ./build/*.bin
 
   deploy:
     needs: build
@@ -190,9 +170,25 @@ EOF
       - name: Copy firmware to docs folder
         run: |
           mkdir -p docs/firmware
+          
+          # Copy ESP32 files
           cp ./artifacts/firmware-ESP32/makerstats.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32/makerstats.bootloader.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32/makerstats.partitions.bin docs/firmware/ || true
+          
+          # Copy ESP32-C3 files
           cp ./artifacts/firmware-ESP32-C3/makerstats-c3.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32-C3/makerstats-c3.bootloader.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32-C3/makerstats-c3.partitions.bin docs/firmware/ || true
+          
+          # Copy ESP32-S3 files
           cp ./artifacts/firmware-ESP32-S3/makerstats-s3.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32-S3/makerstats-s3.bootloader.bin docs/firmware/ || true
+          cp ./artifacts/firmware-ESP32-S3/makerstats-s3.partitions.bin docs/firmware/ || true
+          
+          # Copy boot_app0.bin (shared across all variants)
+          cp ./artifacts/firmware-ESP32/boot_app0.bin docs/firmware/ || true
+          
           ls -la docs/firmware/
 
       - name: Commit and push firmware
